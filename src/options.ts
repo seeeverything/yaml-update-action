@@ -1,7 +1,7 @@
 import * as core from '@actions/core'
 import * as process from 'process'
-import {convertValue, parseChanges} from './helper'
-import {Committer, Changes} from './types'
+import { convertValue, parseChanges } from './helper'
+import { Committer, Changes, Method, Format, QuotingType } from './types'
 
 export interface Options {
   valueFile: string
@@ -11,6 +11,7 @@ export interface Options {
   commitChange: boolean
   updateFile: boolean
   branch: string
+  force: boolean
   masterBranchName: string
   message: string
   title: string
@@ -26,6 +27,10 @@ export interface Options {
   workDir: string
   committer: Committer
   changes: Changes
+  format: Format
+  method: Method
+  noCompatMode: boolean
+  quotingType?: QuotingType
 }
 
 export class GitHubOptions implements Options {
@@ -41,20 +46,28 @@ export class GitHubOptions implements Options {
     return core.getInput('value')
   }
 
-  get branch(): string {
-    return core.getInput('branch')
+  get force(): boolean {
+    return core.getBooleanInput('force')
   }
 
   get commitChange(): boolean {
-    return core.getInput('commitChange') === 'true'
+    return core.getBooleanInput('commitChange')
   }
 
   get updateFile(): boolean {
-    return core.getInput('updateFile') === 'true'
+    return core.getBooleanInput('updateFile')
+  }
+
+  get masterBranchName(): string {
+    return core.getInput('masterBranchName')
+  }
+
+  get branch(): string {
+    return core.getInput('branch') || core.getInput('masterBranchName')
   }
 
   get targetBranch(): string {
-    return core.getInput('targetBranch')
+    return core.getInput('targetBranch') || core.getInput('masterBranchName')
   }
 
   get repository(): string {
@@ -66,7 +79,19 @@ export class GitHubOptions implements Options {
   }
 
   get createPR(): boolean {
-    return core.getInput('createPR') === 'true'
+    return core.getBooleanInput('createPR')
+  }
+
+  get noCompatMode(): boolean {
+    return core.getBooleanInput('noCompatMode')
+  }
+
+  get quotingType(): QuotingType | undefined {
+    const quotingType = core.getInput('quotingType')
+
+    return ['"', "'"].includes(quotingType)
+      ? (quotingType as QuotingType)
+      : undefined
   }
 
   get token(): string {
@@ -129,10 +154,6 @@ export class GitHubOptions implements Options {
     return core.getInput('workDir')
   }
 
-  get masterBranchName(): string {
-    return core.getInput('masterBranchName')
-  }
-
   get committer(): Committer {
     return {
       name: core.getInput('commitUserName'),
@@ -141,7 +162,7 @@ export class GitHubOptions implements Options {
   }
 
   get changes(): Changes {
-    const changes: Changes = {}
+    let changes: Changes = {}
     if (this.valueFile && this.propertyPath) {
       let value: string | number | boolean = this.value
 
@@ -156,7 +177,34 @@ export class GitHubOptions implements Options {
       }
     }
 
-    return parseChanges(changes, this.valueFile, core.getInput('changes'))
+    changes = parseChanges(changes, this.valueFile, core.getInput('changes'))
+    if (Object.keys(changes).length === 0) {
+      core.setFailed('No changes to update detected')
+    }
+
+    return changes
+  }
+
+  get method(): Method {
+    const method = (core.getInput('method') || '').toLowerCase() as Method
+
+    if (
+      [Method.CreateOrUpdate, Method.Create, Method.Update].includes(method)
+    ) {
+      return method
+    }
+
+    return Method.CreateOrUpdate
+  }
+
+  get format(): Format {
+    const format = (core.getInput('format') || '').toLowerCase() as Format
+
+    if ([Format.YAML, Format.JSON, Format.UNKNOWN].includes(format)) {
+      return format
+    }
+
+    return Format.UNKNOWN
   }
 }
 
@@ -181,6 +229,10 @@ export class EnvOptions implements Options {
     return process.env.MASTER_BRANCH_NAME || ''
   }
 
+  get force(): boolean {
+    return process.env.FORCE === 'true'
+  }
+
   get commitChange(): boolean {
     return process.env.COMMIT_CHANGE === 'true'
   }
@@ -199,6 +251,18 @@ export class EnvOptions implements Options {
 
   get createPR(): boolean {
     return process.env.CREATE_PR === 'true'
+  }
+
+  get noCompatMode(): boolean {
+    return process.env.NO_COMPAT_MODE === 'true'
+  }
+
+  get quotingType(): QuotingType | undefined {
+    const quotingType = process.env.QUOTING_TYPE || ''
+
+    return ['"', "'"].includes(quotingType)
+      ? (quotingType as QuotingType)
+      : undefined
   }
 
   get message(): string {
@@ -277,5 +341,27 @@ export class EnvOptions implements Options {
     }
 
     return parseChanges(changes, this.valueFile, process.env.CHANGES || '')
+  }
+
+  get method(): Method {
+    const method = (process.env.METHOD || '').toLowerCase() as Method
+
+    if (
+      [Method.CreateOrUpdate, Method.Create, Method.Update].includes(method)
+    ) {
+      return process.env.METHOD as Method
+    }
+
+    return Method.CreateOrUpdate
+  }
+
+  get format(): Format {
+    const format = (process.env.FORMAT || '').toLowerCase() as Format
+
+    if ([Format.YAML, Format.JSON, Format.UNKNOWN].includes(format)) {
+      return format
+    }
+
+    return Format.UNKNOWN
   }
 }

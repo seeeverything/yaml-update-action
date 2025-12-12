@@ -1,5 +1,6 @@
-import {Octokit} from '@octokit/rest'
-import {Committer, ChangedFile} from './types'
+import { Octokit } from '@octokit/rest'
+import { Actions } from './github-actions'
+import { Committer, ChangedFile } from './types'
 
 export type GitCreateTreeParamsTree = {
   path?: string
@@ -20,10 +21,10 @@ export const currentCommit = async (
   repo: string,
   branch: string,
   masterBranchName: string
-): Promise<{commitSha: string; treeSha: string}> => {
+): Promise<{ commitSha: string; treeSha: string }> => {
   let commitSha = ''
   try {
-    const {data: refData} = await octo.git.getRef({
+    const { data: refData } = await octo.git.getRef({
       owner: org,
       repo,
       ref: `heads/${branch}`
@@ -35,7 +36,7 @@ export const currentCommit = async (
 
     commitSha = refData.object?.sha
   } catch (error) {
-    const {data: refData} = await octo.git.getRef({
+    const { data: refData } = await octo.git.getRef({
       owner: org,
       repo,
       ref: `heads/${masterBranchName}`
@@ -48,7 +49,7 @@ export const currentCommit = async (
     commitSha = refData.object?.sha
   }
 
-  const {data: commitData} = await octo.git.getCommit({
+  const { data: commitData } = await octo.git.getCommit({
     owner: org,
     repo,
     commit_sha: commitSha
@@ -64,8 +65,13 @@ export const currentCommit = async (
   }
 }
 
-export const createBlobForFile = async (octo: Octokit, org: string, repo: string, file: ChangedFile): Promise<string> => {
-  const {data} = await octo.git.createBlob({
+export const createBlobForFile = async (
+  octo: Octokit,
+  org: string,
+  repo: string,
+  file: ChangedFile
+): Promise<string> => {
+  const { data } = await octo.git.createBlob({
     owner: org,
     repo,
     content: file.content,
@@ -79,14 +85,30 @@ export const createBlobForFile = async (octo: Octokit, org: string, repo: string
   return data.sha
 }
 
-export const createNewTree = async (octo: Octokit, owner: string, repo: string, files: ChangedFile[], parentTreeSha: string): Promise<string> => {
+export const createNewTree = async (
+  octo: Octokit,
+  owner: string,
+  repo: string,
+  files: ChangedFile[],
+  parentTreeSha: string
+): Promise<string> => {
   const tree: GitCreateTreeParamsTree[] = []
 
   for (const file of files) {
-    tree.push({path: file.relativePath, mode: `100644`, type: `blob`, sha: file.sha})
+    tree.push({
+      path: file.relativePath,
+      mode: `100644`,
+      type: `blob`,
+      sha: file.sha
+    })
   }
 
-  const {data} = await octo.git.createTree({owner, repo, tree, base_tree: parentTreeSha})
+  const { data } = await octo.git.createTree({
+    owner,
+    repo,
+    tree,
+    base_tree: parentTreeSha
+  })
 
   return data.sha
 }
@@ -100,7 +122,7 @@ export const createNewCommit = async (
   commitSha: string,
   author: Committer
 ): Promise<string> => {
-  const {data} = await octo.git.createCommit({
+  const { data } = await octo.git.createCommit({
     owner,
     repo,
     message,
@@ -116,26 +138,45 @@ export const createNewCommit = async (
   return data.sha
 }
 
-export const updateBranch = async (octo: Octokit, owner: string, repo: string, branch: string, commitSha: string): Promise<void> => {
+export const updateBranch = async (
+  octo: Octokit,
+  owner: string,
+  repo: string,
+  branch: string,
+  force: boolean,
+  commitSha: string,
+  actions: Actions
+): Promise<void> => {
   try {
     await octo.git.updateRef({
       owner,
       repo,
       ref: `heads/${branch}`,
-      sha: commitSha
+      sha: commitSha,
+      force
     })
-  } catch (e) {
-    await octo.git.createRef({
-      owner,
-      repo,
-      ref: `refs/heads/${branch}`,
-      sha: commitSha
-    })
+  } catch (error) {
+    actions.info(
+      `update branch ${branch} failed (${error}), fallback to create branch`
+    )
+
+    try {
+      await octo.git.createRef({
+        owner,
+        repo,
+        ref: `refs/heads/${branch}`,
+        sha: commitSha
+      })
+    } catch (e) {
+      actions.setFailed(`failed to create branch: ${e}`)
+    }
   }
 }
 
-export function repositoryInformation(repository: string): RepositoryInformation {
+export function repositoryInformation(
+  repository: string
+): RepositoryInformation {
   const [owner, repo] = repository.split('/')
 
-  return {owner, repo}
+  return { owner, repo }
 }
